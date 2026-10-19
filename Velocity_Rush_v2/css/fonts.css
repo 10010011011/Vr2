@@ -1,0 +1,9 @@
+/* Self-hosted fonts (latin subset) — no network needed. */
+@font-face { font-family: "Saira Condensed"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/saira-condensed-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira Condensed"; font-style: normal; font-weight: 700; font-display: swap; src: url("../fonts/saira-condensed-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira Condensed"; font-style: normal; font-weight: 800; font-display: swap; src: url("../fonts/saira-condensed-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira Condensed"; font-style: normal; font-weight: 900; font-display: swap; src: url("../fonts/saira-condensed-latin-900-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/saira-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/saira-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/saira-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Saira"; font-style: normal; font-weight: 700; font-display: swap; src: url("../fonts/saira-latin-700-normal.woff2") format("woff2"); }
