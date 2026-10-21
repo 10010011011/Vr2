@@ -21,8 +21,13 @@ VR.ui = (() => {
   /* ----------------------------------------------------------- menu wiring */
   function updateMenuSelection() {
     const s = gameStore;
-    $("btn-scripted").classList.toggle("active", s.opponent === "scripted");
-    $("btn-impossible").classList.toggle("active", s.opponent === "impossible");
+    document.querySelectorAll("#diff-grid .opp").forEach((b) => b.classList.toggle("active", b.dataset.diff === s.difficulty));
+    const canLearn = s.difficulty !== "low";
+    const lr = $("btn-learn");
+    lr.classList.toggle("off", !canLearn);
+    lr.setAttribute("aria-checked", String(canLearn && s.learning));
+    $("learn-sub").textContent = canLearn ? "Rival adapts to you over races" : "Not available on Low";
+    try { localStorage.setItem("vr_diff", JSON.stringify({ d: s.difficulty, l: s.learning })); } catch {}
     document.querySelectorAll(".lap-btn").forEach((b) => b.classList.toggle("active", parseInt(b.dataset.laps) === s.laps));
     const sl = $("nitroMultSlider");
     sl.value = s.oppNitroMult;
@@ -31,7 +36,10 @@ VR.ui = (() => {
   }
 
   function refreshBrain() {
-    loadBrain().then((b) => { if (b && b.stats) gameStore.setBrainStats(b.stats); else updateBrainUI(gameStore.brainStats); });
+    loadBrain().then((b) => {
+      const lb = b && b.v === 2 && b.levels && b.levels[gameStore.difficulty];
+      gameStore.setBrainStats(lb ? lb.stats : { generation: 0, races: 0, bestFitness: 0, lastFitness: 0, wins: 0 });
+    });
   }
   function updateBrainUI(st) {
     if (!st) return;
@@ -240,25 +248,18 @@ VR.ui = (() => {
     const boot = $("boot");
     boot.classList.remove("hidden-boot");
     const setProg = (f, label) => { $("boot-fill").style.width = Math.round(VR.clamp(f, 0.03, 1) * 100) + "%"; if (label) $("boot-sub").textContent = label; };
-    setProg(0.03, gameStore.opponent === "impossible" ? "Initialising Felix v3…" : "Seeding scripted opponent…");
+    const level = gameStore.difficulty;
+    const learning = gameStore.learning && level !== "low";
+    setProg(0.03, learning ? "Waking Felix…" : "Seeding rival…");
 
-    let weights = null, stats = gameStore.brainStats;
-    if (gameStore.opponent === "impossible") {
-      const saved = await loadBrain();
-      if (saved) {
-        const loadedNet = deserialize(saved.net);
-        const mismatch = loadedNet.shape.inputs !== NN_INPUTS || loadedNet.shape.outputs !== NN_OUTPUTS || loadedNet.shape.hidden.join(",") !== NN_HIDDEN.join(",");
-        if (mismatch) {
-          weights = makeMLP({ inputs: NN_INPUTS, hidden: NN_HIDDEN, outputs: NN_OUTPUTS });
-          stats = { generation: 0, races: 0, bestFitness: 0, lastFitness: 0, wins: 0 };
-          await saveBrain({ net: serialize(weights), stats, savedAt: Date.now() });
-        } else { weights = loadedNet; stats = saved.stats; }
-      } else {
-        weights = makeMLP({ inputs: NN_INPUTS, hidden: NN_HIDDEN, outputs: NN_OUTPUTS });
-        stats = { generation: 0, races: 0, bestFitness: 0, lastFitness: 0, wins: 0 };
-        await saveBrain({ net: serialize(weights), stats, savedAt: Date.now() });
-      }
-      gameStore.setBrainStats(stats);
+    let theta = null, root = null;
+    if (learning) {
+      root = await loadBrain();
+      if (!root || root.v !== 2 || !root.levels) root = { v: 2, levels: {} };   // old neural brain is discarded
+      const lb = root.levels[level] || (root.levels[level] = Learner.fresh());
+      theta = Learner.propose(lb);
+      await saveBrain(root);
+      gameStore.setBrainStats(lb.stats);
     }
     if (token !== bootToken) return;
     try {
@@ -266,8 +267,18 @@ VR.ui = (() => {
       racing = true; keyHintTimer = 0; document.body.classList.remove("keys-fade");
       await new Promise((r) => requestAnimationFrame(r));
       game = await app.startRace({
-        trackSeed: gameStore.seed, laps: gameStore.laps, opponentKind: gameStore.opponent, neuralWeights: weights, neuralGeneration: stats.generation, input: VR.input,
-        onFinish: (winner, totalMs, extra) => { gameStore.setHud({ finished: { winner, totalMs, extra } }); showFinish(); },
+        trackSeed: gameStore.seed, laps: gameStore.laps, difficulty: level, theta, input: VR.input,
+        onFinish: (winner, totalMs, extra) => {
+          gameStore.setHud({ finished: { winner, totalMs, extra } }); showFinish();
+          if (learning && root) {
+            try {
+              const lb = root.levels[level];
+              Learner.report(lb, winner === "opponent", Math.abs((extra && extra.gap) || 0));
+              gameStore.setBrainStats(lb.stats);
+              saveBrain(root);
+            } catch (e) { console.warn("[learn]", e); }
+          }
+        },
       }, setProg);
       if (token !== bootToken) return;
       boot.classList.add("hidden-boot");
@@ -327,8 +338,10 @@ VR.ui = (() => {
     });
     updateMenuSelection(); updateBrainUI(gameStore.brainStats);
 
-    $("btn-scripted").addEventListener("click", () => gameStore.setOpponent("scripted"));
-    $("btn-impossible").addEventListener("click", () => gameStore.setOpponent("impossible"));
+    document.querySelectorAll("#diff-grid .opp").forEach((b) => b.addEventListener("click", () => { gameStore.setDifficulty(b.dataset.diff); refreshBrain(); }));
+    $("btn-learn").addEventListener("click", () => { if (gameStore.difficulty !== "low") gameStore.setLearning(!gameStore.learning); });
+    try { const sv = JSON.parse(localStorage.getItem("vr_diff") || "null"); if (sv && DIFFICULTY[sv.d]) { gameStore.difficulty = sv.d; gameStore.learning = !!sv.l; } } catch {}
+    updateMenuSelection(); refreshBrain();
     document.querySelectorAll(".lap-btn").forEach((b) => b.addEventListener("click", () => gameStore.setLaps(parseInt(b.dataset.laps))));
     $("nitroMultSlider").addEventListener("input", (e) => gameStore.setOppNitroMult(parseFloat(e.target.value)));
     $("btn-start").addEventListener("click", () => { gameStore.reseed(); bootRace(); });

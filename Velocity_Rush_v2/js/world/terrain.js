@@ -157,11 +157,14 @@ VR.buildTerrain = function buildTerrain(info, seed, q, atm) {
         {
           float dist = length(vWorldPos - cameraPosition);
           vec2 p = vWorldPos.xz;
-          vec4 d1 = texture2D(uDetail, p * 0.052);
-          vec4 d2 = texture2D(uDetail, p * 0.39 + 0.31);
           vec4 d3 = texture2D(uDetail, p * 0.0117 + 0.7);
           float far = smoothstep(60.0, 320.0, dist);
-          vec4 dd = mix(d1 * 0.45 + d2 * 0.55, vec4(0.5) + (d3 - 0.5) * 0.4, far);
+          vec4 dd = vec4(0.5) + (d3 - 0.5) * 0.4;
+          if (far < 0.999) {
+            vec4 d1 = texture2D(uDetail, p * 0.052);
+            vec4 d2 = texture2D(uDetail, p * 0.39 * step(dist, 140.0) + 0.31);
+            dd = mix(d1 * 0.45 + d2 * 0.55, dd, far);
+          }
           vec4 sp = vSplat;
           float s = sp.x + sp.y + sp.z + sp.w + 1e-4;
           float det = (dd.r * sp.x + dd.g * sp.y + dd.b * sp.z + dd.a * sp.w) / s;

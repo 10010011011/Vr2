@@ -10,21 +10,21 @@ VR.QUALITY = {
     cloudOct: 3, water: "simple", detailTex: false,
   },
   medium: {
-    label: "Medium", pixelRatio: 1.25, shadows: true, shadowMap: 1024, shadowRadius: 55,
+    label: "Medium", pixelRatio: 1.15, shadows: true, shadowMap: 1024, shadowRadius: 55,
     msaa: 0, bloom: true, bloomLevels: 4, rays: false, terrainCell: 8, terrainBand: 200,
     trees: 0.75, grass: 0.45, rocks: 0.85, props: 0.85, particles: 0.8, skid: true, envUpdate: true,
     cloudOct: 4, water: "full", detailTex: true,
   },
   high: {
-    label: "High", pixelRatio: 1.75, shadows: true, shadowMap: 2048, shadowRadius: 70,
-    msaa: 4, bloom: true, bloomLevels: 5, rays: true, terrainCell: 6, terrainBand: 230,
-    trees: 1.0, grass: 0.8, rocks: 1.0, props: 1.0, particles: 1.0, skid: true, envUpdate: true,
+    label: "High", pixelRatio: 1.5, shadows: true, shadowMap: 2048, shadowRadius: 70,
+    msaa: 2, bloom: true, bloomLevels: 5, rays: true, terrainCell: 7, terrainBand: 220,
+    trees: 1.0, grass: 0.7, rocks: 1.0, props: 1.0, particles: 1.0, skid: true, envUpdate: true,
     cloudOct: 5, water: "full", detailTex: true,
   },
   ultra: {
-    label: "Ultra", pixelRatio: 2.5, shadows: true, shadowMap: 4096, shadowRadius: 85,
-    msaa: 4, bloom: true, bloomLevels: 6, rays: true, terrainCell: 5, terrainBand: 250,
-    trees: 1.25, grass: 1.0, rocks: 1.15, props: 1.0, particles: 1.25, skid: true, envUpdate: true,
+    label: "Ultra", pixelRatio: 1.9, shadows: true, shadowMap: 3072, shadowRadius: 85,
+    msaa: 4, bloom: true, bloomLevels: 5, rays: true, terrainCell: 6, terrainBand: 240,
+    trees: 1.15, grass: 0.9, rocks: 1.15, props: 1.0, particles: 1.25, skid: true, envUpdate: true,
     cloudOct: 5, water: "full", detailTex: true,
   },
 };
@@ -57,6 +57,12 @@ VR.resolveQualityName = () => {
 VR.getQuality = () => {
   const q = Object.assign({}, VR.QUALITY[VR.resolveQualityName()]);
   q.pixelRatio = Math.min(q.pixelRatio, Math.max(1, window.devicePixelRatio || 1));
+  if (VR.isMobile()) {
+    // phones: multisampled half-float targets and big shadow maps are what make High/Ultra stutter -> FXAA + 2K maps
+    q.msaa = 0;
+    q.shadowMap = Math.min(q.shadowMap, 2048);
+    q.bloomLevels = Math.min(q.bloomLevels, 5);
+  }
   return q;
 };
 

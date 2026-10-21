@@ -69,15 +69,17 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
   // ---------------------------------------------------------------- geometries
   function makePine(sd, near) {
     const parts = [];
-    const trunk = new THREE.CylinderGeometry(0.2, 0.42, 3.6, 6, 1, true); trunk.translate(0, 1.8, 0);
-    paint(trunk, (x, y) => mix3(C.bark, C.barkLight, y / 3.6 * 0.5));
-    parts.push(part(trunk));
-    const tiers = near ? 5 : 3;
+    if (near) {
+      const trunk = new THREE.CylinderGeometry(0.2, 0.42, 3.6, 6, 1, true); trunk.translate(0, 1.8, 0);
+      paint(trunk, (x, y) => mix3(C.bark, C.barkLight, y / 3.6 * 0.5));
+      parts.push(part(trunk));
+    }
+    const tiers = near ? 5 : 2;
     for (let i = 0; i < tiers; i++) {
       const t = i / (tiers - 1);
       const r = lerp(3.5, 0.85, Math.pow(t, 0.9)) * (0.94 + h3(sd, i, 1) * 0.14);
-      const h = lerp(5.4, 3.2, t), y0 = (near ? 1.9 : 2.2) + i * (near ? 2.15 : 3.2);
-      const cone = new THREE.ConeGeometry(r, h, near ? 9 : 6, 1, false);
+      const h = near ? lerp(5.4, 3.2, t) : lerp(8.6, 6.2, t), y0 = (near ? 1.9 : 1.7) + i * (near ? 2.15 : 4.3);
+      const cone = new THREE.ConeGeometry(near ? r : r * 1.15, h, near ? 9 : 5, 1, false);
       const p = cone.attributes.position;
       for (let k = 0; k < p.count; k++) {
         const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
@@ -111,13 +113,13 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
       return mix3(C.bark, C.barkLight, 0.4 * noise3(x * 5, y * 3, z * 5));
     });
     parts.push(part(trunk));
-    const nb = near ? (birch ? 4 : 7) : 3;
+    const nb = near ? (birch ? 3 : 5) : 1;
     const col = birch ? [C.birchMid, C.birchTop] : [C.oakMid, C.oakTop];
     for (let i = 0; i < nb; i++) {
       const a = (i / nb) * 6.283 + h3(sd, i, 3) * 1.2;
       const top = i === 0;
-      const rr = top ? 0 : (birch ? 0.85 : 1.9) * (0.75 + 0.5 * h3(sd, i, 5)) * (near ? 1 : 1.1);
-      const rad = (birch ? 1.55 : 2.35) * (0.8 + 0.4 * h3(sd, i, 9)) * (top ? 1.2 : 1) * (near ? 1 : 1.2);
+      const rr = top ? 0 : (birch ? 0.85 : 1.9) * (0.75 + 0.5 * h3(sd, i, 5));
+      const rad = (birch ? 1.55 : 2.35) * (0.8 + 0.4 * h3(sd, i, 9)) * (top ? 1.2 : 1) * (near ? 1 : 1.55);
       const by = th + (birch ? 1.2 : 1.35) + (top ? (birch ? 1.0 : 1.1) : (h3(sd, i, 11) - 0.35) * 1.6);
       const bx = Math.cos(a) * rr, bz = Math.sin(a) * rr;
       const g = blob(rad, 1, sd * 3 + i * 7, 0.2, birch ? 1.3 : 0.82);
@@ -169,6 +171,7 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
   }
 
   // ---------------------------------------------------------------- materials
+  const grassFar = { value: 108 };
   const windU = { uTime: VR.uniforms.uTime, uWind: VR.uniforms.uWind };
   const swayGLSL = (amp) => `
     #ifdef USE_INSTANCING
@@ -237,11 +240,11 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
   function grassMaterial(flowers) {
     const m = VR.reg(new THREE.MeshStandardMaterial({ map: bladeTexture(flowers), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: 0.9 }), 0.9);
     VR.patch(m, {
-      key: flowers ? "flowers" : "grass", worldPos: true, uniforms: windU,
-      vertexDecl: "uniform float uTime; uniform float uWind;",
+      key: flowers ? "flowers" : "grass", worldPos: true, uniforms: Object.assign({ uGrassFar: grassFar }, windU),
+      vertexDecl: "uniform float uTime; uniform float uWind; uniform float uGrassFar;",
       vertexMain: swayGLSL("0.16") + `
         float gd = distance(cameraPosition.xz, ip.xz);
-        transformed *= 1.0 - smoothstep(64.0, 108.0, gd);
+        transformed *= 1.0 - smoothstep(uGrassFar * 0.6, uGrassFar, gd);
       `,
       fragAfterNormal: `normal = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz * 0.88 + normal * 0.12);`,
     });
@@ -263,27 +266,27 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
   }
 
   // ---------------------------------------------------------------- species table
-  const lodNear = 250;
-  const treeCull = 520 + 560 * q.trees;
+  const lodNear = 105 + 35 * Math.min(1.2, q.trees);
+  const treeCull = 380 + 320 * q.trees;
   const SP = {
     pine0:  { near: makePine(3, true),  far: makePine(3, false), mat: foliageMat, cast: true, recv: true, cull: treeCull },
     pine1:  { near: makePine(8, true),  far: makePine(8, false), mat: foliageMat, cast: true, recv: true, cull: treeCull },
     oak0:   { near: makeBroad(2, true, "oak"), far: makeBroad(2, false, "oak"), mat: foliageMat, cast: true, recv: true, cull: treeCull },
     oak1:   { near: makeBroad(6, true, "oak"), far: makeBroad(6, false, "oak"), mat: foliageMat, cast: true, recv: true, cull: treeCull },
     birch:  { near: makeBroad(4, true, "birch"), far: makeBroad(4, false, "birch"), mat: foliageMat, cast: true, recv: true, cull: treeCull * 0.85 },
-    bush:   { near: makeBush(5), far: null, mat: foliageMat, cast: false, recv: true, cull: 330 },
-    rock0:  { near: makeRock(1, 1.15, 0.85, 1.0), far: null, mat: rockMat, cast: true, recv: true, cull: 520 },
-    rock1:  { near: makeRock(7, 1.4, 0.6, 0.95), far: null, mat: rockMat, cast: true, recv: true, cull: 520 },
-    rock2:  { near: makeRock(13, 0.8, 1.35, 0.85), far: null, mat: rockMat, cast: true, recv: true, cull: 600 },
+    bush:   { near: makeBush(5), far: null, mat: foliageMat, cast: false, recv: true, cull: 210 },
+    rock0:  { near: makeRock(1, 1.15, 0.85, 1.0), far: null, mat: rockMat, cast: true, recv: true, cull: 380 },
+    rock1:  { near: makeRock(7, 1.4, 0.6, 0.95), far: null, mat: rockMat, cast: true, recv: true, cull: 380 },
+    rock2:  { near: makeRock(13, 0.8, 1.35, 0.85), far: null, mat: rockMat, cast: true, recv: true, cull: 440 },
   };
   const GRASS = {
-    grass: { near: makeTuft(1.05, 0.62), far: null, mat: grassMat, cast: false, recv: false, cull: 120 },
-    flower: { near: makeTuft(0.85, 0.55), far: null, mat: flowerMat, cast: false, recv: false, cull: 120 },
+    grass: { near: makeTuft(1.05, 0.62), far: null, mat: grassMat, cast: false, recv: false, cull: 110 },
+    flower: { near: makeTuft(0.85, 0.55), far: null, mat: flowerMat, cast: false, recv: false, cull: 110 },
   };
   if (!q.shadows) for (const k in SP) { SP[k].cast = false; SP[k].recv = false; }
 
   // ---------------------------------------------------------------- binning
-  const BIG = 160, SMALL = 64;
+  const BIG = 112, SMALL = 64;
   const bigBins = new Map(), smallBins = new Map();
   const _e = new THREE.Euler(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _m = new THREE.Matrix4();
   function put(bins, size, sp, x, y, z, yaw, sx, sy, sz, tx, tz, c) {
@@ -456,6 +459,8 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
     if (geo.index) g.setIndex(geo.index);
     return g;
   }
+  // invisible-in-colour caster: draws the cheap far-LOD silhouette into the shadow map only
+  const proxyMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
   function buildBins(bins, size, defs, lodDist) {
     for (const b of bins.values()) {
       const cxm = (b.cx + 0.5) * size, czm = (b.cz + 0.5) * size;
@@ -463,22 +468,31 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
       const ch = { x: cxm, z: czm, half: size / 2, items: [] };
       for (const name in b.sp) {
         const def = defs[name], s = b.sp[name], count = s.m.length / 16;
+        const centre = new THREE.Vector3(cxm, cym, czm);
         const near = new THREE.InstancedMesh(shallow(def.near), def.mat, count);
         near.instanceMatrix.array.set(s.m); near.instanceMatrix.needsUpdate = true;
         near.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(s.c), 3);
-        VR.setBounds(near.geometry, new THREE.Vector3(cxm, cym, czm), rad);
-        near.castShadow = def.cast; near.receiveShadow = def.recv; near.matrixAutoUpdate = false; near.name = name;
+        VR.setBounds(near.geometry, centre, rad);
+        near.castShadow = false; near.receiveShadow = def.recv; near.matrixAutoUpdate = false; near.name = name;
         group.add(near);
-        let far = null;
+        let far = null, proxy = null;
         if (def.far) {
           far = new THREE.InstancedMesh(shallow(def.far), def.mat, count);
           far.instanceMatrix = near.instanceMatrix; far.instanceColor = near.instanceColor;
-          VR.setBounds(far.geometry, new THREE.Vector3(cxm, cym, czm), rad);
+          VR.setBounds(far.geometry, centre, rad);
           far.castShadow = false; far.receiveShadow = false; far.matrixAutoUpdate = false; far.name = name + "_far";
           far.visible = false;
           group.add(far);
+          if (def.cast && q.shadows) {
+            proxy = new THREE.InstancedMesh(shallow(def.far), proxyMat, count);
+            proxy.instanceMatrix = near.instanceMatrix;
+            VR.setBounds(proxy.geometry, centre, rad);
+            proxy.castShadow = true; proxy.receiveShadow = false; proxy.matrixAutoUpdate = false; proxy.name = name + "_shadow";
+            proxy.visible = false;
+            group.add(proxy);
+          }
         }
-        ch.items.push({ near, far, cull: def.cull, lod: lodDist });
+        ch.items.push({ near, far, proxy, selfShadow: !def.far && def.cast, cull: def.cull, lod: lodDist });
       }
       chunks.push(ch);
     }
@@ -545,16 +559,21 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
 
   // ---------------------------------------------------------------- per-frame
   const cullStep = { acc: 0 };
+  let lodScale = 1;
+  const shadowRange = (q.shadowRadius || 60) * 1.15 + 24;
   function cull(camera) {
     const cx = camera.position.x, cz = camera.position.z;
     for (const c of chunks) {
       const d = Math.max(0, Math.hypot(c.x - cx, c.z - cz) - c.half * 1.2);
       for (const it of c.items) {
-        const vis = d < it.cull;
+        const vis = d < it.cull * lodScale;
+        let nearVis;
         if (it.far) {
-          const nearVis = vis && d < it.lod;
+          nearVis = vis && d < it.lod * lodScale;
           it.near.visible = nearVis; it.far.visible = vis && !nearVis;
-        } else it.near.visible = vis;
+        } else { nearVis = vis; it.near.visible = vis; }
+        if (it.proxy) it.proxy.visible = nearVis && d < shadowRange;
+        else if (it.selfShadow) it.near.castShadow = nearVis && d < shadowRange;
       }
     }
   }
@@ -562,6 +581,8 @@ VR.buildScenery = function buildScenery(info, terrain, seed, q, atm, road) {
   const api = {
     group,
     stats: { trees: nTrees, rocks: nRocks, bushes: nBush, grass: nGrass, chunks: chunks.length, signs: signs.length },
+    /** load governor: 1 = full distances, <1 pulls LOD / culling / grass in */
+    setLodScale(v) { lodScale = VR.clamp(v, 0.5, 1); grassFar.value = 108 * lodScale; first = true; },
     update(dt, camera) {
       nightU.uNightL.value = atm.night;
       VR.uniforms.uWind.value = 0.85 + 0.3 * Math.sin(VR.uniforms.uTime.value * 0.23) + 0.15 * Math.sin(VR.uniforms.uTime.value * 0.71);

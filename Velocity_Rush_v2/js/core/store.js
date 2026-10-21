@@ -7,10 +7,10 @@
 const defaultStats = { generation: 0, races: 0, bestFitness: 0, lastFitness: 0, wins: 0 };
 
 const gameStore = {
-  opponent: "scripted",
+  learning: false,
   laps: 2,
   seed: Math.floor(Math.random() * 1e9),
-  difficulty: "normal",
+  difficulty: "high",   // low | medium | high | max
   oppNitroMult: 1,
 
   // live race state
@@ -22,7 +22,8 @@ const gameStore = {
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   _emit(kind) { for (const fn of this._subs) fn(this, kind); },
 
-  setOpponent(o) { this.opponent = o; this._emit("menu"); },
+  setDifficulty(d) { this.difficulty = d; this._emit("menu"); },
+  setLearning(v) { this.learning = !!v; this._emit("menu"); },
   setOppNitroMult(m) { this.oppNitroMult = m; this._emit("menu"); },
   setLaps(n) { this.laps = n; this._emit("menu"); },
   reseed() { this.seed = Math.floor(Math.random() * 1e9); },

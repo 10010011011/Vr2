@@ -9,7 +9,7 @@ VR.App = class App {
     this.mode = "menu";                 // menu | race
     this.game = null; this.showroom = null;
     this.fps = { frames: 0, acc: 0, value: 0, last: 0 };
-    this.pr = 1; this.prBase = 1; this._slowWin = 0; this._fastWin = 0;
+    this.pr = 1; this.prBase = 1; this.gov = { level: 0, slow: 0, calm: 0, lastDown: -1e9, ups: 0 }; this.shadowSkip = false; this._fc = 0;
     this.lastT = performance.now();
     this.t = 0;
     this._init();
@@ -101,6 +101,8 @@ VR.App = class App {
     this.atm.setMode(VR.settings.timeOfDay === "dynamic" ? "dynamic" : VR.settings.timeOfDay);
     const game = new VR.Game(this, opts);
     this.game = game;
+    this.gov = { level: 0, slow: 0, calm: 0, lastDown: -1e9, ups: 0 }; this.shadowSkip = false;
+    this.renderer.shadowMap.autoUpdate = true;
     await game.init(progress);
     this.camera.near = 0.5;
     this.camera.updateProjectionMatrix();
@@ -110,10 +112,12 @@ VR.App = class App {
   }
 
   stopRace() {
-    if (this.game) { this.game.destroy(); this.game = null; }
+    if (this.game) { try { this.game.destroy(); } catch (e) { console.warn("[destroy]", e); } this.game = null; }
     this.camera.setViewOffset && this.camera.clearViewOffset();
     this.camera.fov = 40; this.camera.updateProjectionMatrix();
     this.post.params.speed = 0; this.post.params.nitro = 0; this.post.params.flash = 0;
+    this.gov.level = 0; this.shadowSkip = false; this.renderer.shadowMap.autoUpdate = true;
+    if (this.pr !== this.prBase) this._pendingPR = this.prBase;
     this.setMode("menu");
     this.resizeToWindow();
   }
@@ -140,6 +144,7 @@ VR.App = class App {
     try {
       if (this.mode === "race" && this.game && !this.game.destroyed) {
         if (this.game.ready) { this.game.step(dt, now); if (VR.ui) VR.ui.frame(this.game, dt); }
+        if (this.shadowSkip) { this.renderer.shadowMap.autoUpdate = false; this.renderer.shadowMap.needsUpdate = (this._fc++ & 1) === 0; }
         this.post.render(this.scene, this.camera, this.atm.sunDir, 1);
       } else if (this.mode === "menu") {
         this.showroom.update(dt);
@@ -151,18 +156,29 @@ VR.App = class App {
     this._perf(raw, now);
   }
 
+  _applyGov() {
+    const g = this.gov, L = g.level;
+    const lod = [1, 0.8, 0.65, 0.55][L], res = [1, 1, 0.92, 0.85][L];
+    const sc = this.game && this.game.world && this.game.world.parts.scenery;
+    if (sc && sc.setLodScale) sc.setLodScale(lod);
+    this._pendingPR = this.prBase > 1 ? Math.max(1, this.prBase * res) : this.prBase;
+    this.shadowSkip = L >= 3;
+    if (!this.shadowSkip) { this.renderer.shadowMap.autoUpdate = true; }
+  }
+
   _perf(raw, now) {
     const f = this.fps;
     f.frames++; f.acc += raw;
     if (f.acc >= 0.5) {
       f.value = f.frames / f.acc;
       if (VR.ui && VR.settings.showFps) VR.ui.setFps(f.value, this.pr);
-      // dynamic resolution (only while it matters: racing, or the menu on weak devices)
-      const avg = f.acc / f.frames;
-      if (this.mode === "race" && this.game && this.game.countdown <= 0) {
-        if (avg > 1 / 36) { this._slowWin++; this._fastWin = 0; } else if (avg < 1 / 55) { this._fastWin++; this._slowWin = 0; } else { this._slowWin = 0; this._fastWin = 0; }
-        if (this._slowWin >= 3 && this.pr > 0.7) { this._slowWin = 0; this._pendingPR = Math.max(0.7, this.pr - 0.15); }
-        else if (this._fastWin >= 12 && this.pr < this.prBase) { this._fastWin = 0; this._pendingPR = Math.min(this.prBase, this.pr + 0.1); }
+      // adaptive load shedding (Auto quality only). Sheds scenery distance / shadow refresh first and never drops the
+      // render resolution below native, so the picture stays sharp; it recovers slowly and at most twice per race.
+      const avg = f.acc / f.frames, g = this.gov;
+      if (VR.settings.quality === "auto" && this.mode === "race" && this.game && this.game.countdown <= 0) {
+        if (avg > 1 / 38) { g.slow++; g.calm = 0; } else if (avg < 1 / 54) { g.calm++; g.slow = 0; } else { g.slow = 0; g.calm = 0; }
+        if (g.slow >= 2 && g.level < 3) { g.level++; g.slow = 0; g.lastDown = now; this._applyGov(); }
+        else if (g.calm >= 30 && g.level > 0 && now - g.lastDown > 30000 && g.ups < 2) { g.level--; g.ups++; g.calm = 0; this._applyGov(); }
       }
       f.frames = 0; f.acc = 0;
     }

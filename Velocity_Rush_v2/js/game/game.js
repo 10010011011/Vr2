@@ -16,7 +16,7 @@ const NITRO_REGEN = 0.06;
 const GRAVITY = 28;
 
 VR.Game = class Game {
-  /** app: { renderer, scene, camera, atm, post, q, canvas } ; opts: { trackSeed, laps, opponentKind, neuralWeights, neuralGeneration, input, onFinish } */
+  /** app: { renderer, scene, camera, atm, post, q, canvas } ; opts: { trackSeed, laps, difficulty, theta, input, onFinish } */
   constructor(app, opts) {
     this.app = app; this.opts = opts;
     this.scene = app.scene; this.camera = app.camera; this.atm = app.atm; this.post = app.post; this.q = app.q;
@@ -53,20 +53,16 @@ VR.Game = class Game {
     const startHeading = Math.atan2(start.tangent.x, start.tangent.z);
     const presets = VR.CAR_PRESETS;
     const pIdx = VR.clamp(VR.settings.car | 0, 0, presets.length - 1);
-    let oIdx = opts.opponentKind === "impossible" ? 5 : 1;
+    let oIdx = opts.difficulty === "max" ? 5 : 1;
     if (oIdx === pIdx) oIdx = (oIdx + 2) % presets.length;
     this.player = this.spawnCar(presets[pIdx], "1", start.pos, start.normal, 5, startHeading, true, 0);
     this.opponent = this.spawnCar(presets[oIdx], "7", start.pos, start.normal, -5, startHeading, false, 2);
     this.player._lapStartProgress = 0; this.opponent._lapStartProgress = 0;
     this.player.speed = 0; this.opponent.speed = 0;
 
-    if (opts.opponentKind === "impossible") {
-      this.opponent.isImpossible = true;
-      this.opponentAI = new ImpossibleOpponent(this.track, opts.neuralWeights || null, opts.neuralGeneration || 0);
-    } else {
-      this.opponent.isImpossible = false;
-      this.opponentAI = new ScriptedOpponent(this.track, 1.05, 320, 88);
-    }
+    const dc = (typeof DIFFICULTY !== "undefined" && DIFFICULTY[opts.difficulty || "high"]) || {};
+    this.opponent.accelMul = dc.accelMul || 1; this.opponent.topMul = dc.topMul || 1;
+    this.opponentAI = makeOpponent(this.track, opts.difficulty || "high", opts.theta || null);
 
     // nitro bottles (same placement rules as the original: 18 along the lap, never on water)
     const rng = Math.random;
@@ -104,8 +100,9 @@ VR.Game = class Game {
 
   destroy() {
     this.destroyed = true;
-    if (this.world) this.world.dispose();
-    for (const c of [this.player, this.opponent]) if (c) { this.scene.remove(c.mesh); c.vis.dispose(); }
+    const safe = (fn) => { try { fn(); } catch (e) { console.warn("[destroy]", e); } };
+    if (this.world) safe(() => this.world.dispose());
+    for (const c of [this.player, this.opponent]) if (c) safe(() => { this.scene.remove(c.mesh); c.vis.dispose(); });
     if (this.bottleSet) { this.scene.remove(this.bottleSet.group); this.bottleSet.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     for (const f of [this.smoke, this.glow]) if (f) { this.scene.remove(f.points); f.points.geometry.dispose(); f.points.material.dispose(); }
     if (this.skids) { this.scene.remove(this.skids.mesh); this.skids.mesh.geometry.dispose(); this.skids.mesh.material.dispose(); }
@@ -226,7 +223,7 @@ VR.Game = class Game {
       c.spinAngle += dt * 14;
       c.speed = Math.max(0, c.speed - 18 * dt);
     } else {
-      const accelRate = c.isImpossible ? ACCEL * 1.4 : ACCEL;
+      const accelRate = ACCEL * (c.accelMul || 1);
       if (input.throttle > 0) c.speed += accelRate * input.throttle * dt;
       else if (input.throttle < 0) c.speed += BRAKE * input.throttle * dt;
 
@@ -239,8 +236,8 @@ VR.Game = class Game {
         c.nitroCharge = Math.min(1, c.nitroCharge + NITRO_REGEN * regenMult * dt);
       }
 
-      const topNitroSpd = c.isImpossible ? 115 : NITRO_MAX_SPEED;
-      const topBaseSpd = c.isImpossible ? 72 : MAX_SPEED;
+      const topNitroSpd = NITRO_MAX_SPEED * (c.topMul || 1);
+      const topBaseSpd = MAX_SPEED * (c.topMul || 1);
       const maxS = c.nitroActive ? topNitroSpd : topBaseSpd;
       if (c.speed > maxS) c.speed -= (c.speed - maxS) * Math.min(1, dt * 6);
       c.speed -= Math.sign(c.speed) * DRAG * dt * (Math.abs(c.speed) * 0.05 + 1);

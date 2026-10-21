@@ -33,7 +33,7 @@ VR.buildWorld = async function buildWorld({ track, info, seed, q, atm, scene, pr
       scene.remove(group);
       group.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
-        if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { for (const k in m) { const v = m[k]; if (v && v.isTexture && !v.userData.shared) v.dispose(); } m.dispose(); const i = VR.matRegistry.indexOf(m); if (i >= 0) VR.matRegistry.splice(i, 1); } }
+        if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { for (const k in m) { const v = m[k]; if (v && v.isTexture && !(v.userData && v.userData.shared)) v.dispose(); } m.dispose(); const i = VR.matRegistry.indexOf(m); if (i >= 0) VR.matRegistry.splice(i, 1); } }
       });
     },
   };

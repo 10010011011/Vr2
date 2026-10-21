@@ -1,13 +1,11 @@
-// ===== Opponent AI (Scripted + Impossible/Felix v3) and feature extraction — carried over unchanged =====
+// ===== Opponent AI: tuned racing-line driver (Low/Medium/High) + tactical driver (Max) + real parameter learner =====
     const SCRIPTED_LOOKAHEAD = 18;
-    const NEURAL_HZ = 60;
-    const NN_INPUTS = 44;
-    const NN_HIDDEN = [192, 192, 128, 64];
-    const NN_OUTPUTS = 5;
-
     class ScriptedOpponent {
-      constructor(track, speedBoost = 1.0, aLat = 320, vTop = 88) {
+      constructor(track, speedBoost = 1.0, aLat = 320, vTop = 88, opt = {}) {
         this.track = track;
+        this.opt = opt;
+        this.nitroOn = opt.nitroOn !== false;
+        this.rubber = opt.rubber !== false;
         this.speedBoost = speedBoost;
         const n = track.samples.length;
         const s = track.samples;
@@ -99,10 +97,10 @@
           self._nitroCooldownT = Math.max(0, (self._nitroCooldownT || 3) - _dt);
           if (self._nitroCooldownT <= 0) self._nitroState = 'BLAST';
         }
-        const nitro = self._nitroState === 'BLAST' && self.nitroCharge > 0.02 && nitroCornerSafe;
+        const nitro = this.nitroOn && self._nitroState === 'BLAST' && self.nitroCharge > 0.02 && nitroCornerSafe;
 
         const gap = opponent.totalProgress - self.totalProgress;
-        if (gap > 30) throttle = Math.min(1.0, throttle + 0.08);
+        if (this.rubber && gap > 30) throttle = Math.min(1.0, throttle + 0.08);
 
         const kHere = this.cornerSharpness[idx];
         const cornerTighten = 1 / (1 + kHere * 4.5);
@@ -131,20 +129,19 @@
       }
     }
 
+    /* Max: same fair physics as the player, plus tactics — overtake lines, nitro stealing,
+       bottle seeking and a light catch-up assist. P = { boost, aLat, vTop, nitroMin, catchUp } */
     class ImpossibleOpponent {
-      constructor(track, weights = null, generation = 0) {
+      constructor(track, P = {}) {
         this.track = track;
-        this.base = new ScriptedOpponent(track, 1.28, 600, 115);
-        this.weights = weights;
-        this._generation = generation;
-        this.lastNetTickAt = 0;
-        this.lastNetOut = null;
+        this.P = P;
+        this.base = new ScriptedOpponent(track, P.boost || 1.0, P.aLat || 320, P.vTop || 88);
       }
       update(self, opponent, _dt, bottles) {
         const n   = this.track.samples.length;
         const idx = nearestSampleIndex(this.track, self.pos, self.progress);
         const spd = Math.abs(self.speed);
-        const base = this.base;
+        const base = this.base, P = this.P;
 
         let vTarget = base.vMax[idx] * base.speedBoost;
         for (let k = 1; k <= 10; k++) {
@@ -152,69 +149,32 @@
         }
 
         const speedErr = spd - vTarget;
-        let throttle = speedErr > 1 ? Math.max(-1, -speedErr * 0.08) : 1.0;
+        let throttle = speedErr > 1 ? Math.max(-1, -speedErr * (P.brakeK || 0.08)) : 1.0;
 
         const gap = self.totalProgress - opponent.totalProgress;
-        if (gap > 500) throttle = Math.min(throttle, 0.6);
-        else if (gap < -10) {
+        if (gap > 400) throttle = Math.min(throttle, 0.6);
+        else if (gap < -10 && P.catchUp) {
           const deficit = Math.min(1, (-gap - 10) / 100);
-          throttle = Math.min(1, throttle + 0.15 + deficit * 0.35);
+          throttle = Math.min(1, throttle + P.catchUp * (0.4 + deficit * 0.6));
         }
 
-        // Refined Nitro activation threshold scaling (proper 1x vs 5x distinction)
         const oppMult = (typeof gameStore !== 'undefined' && gameStore.oppNitroMult) || 1;
-        const minChargeToFire = Math.max(0.10, 0.48 - (oppMult - 1) * 0.09);
-        const nitroCornerOk = base.vMax[idx] > 22;
+        const minChargeToFire = Math.max(0.10, (P.nitroMin || 0.48) - (oppMult - 1) * 0.09);
+        const nitroCornerOk = base.vMax[idx] > (P.nitroCorner || 30);
 
         if (!self._nitroActive) {
-          if (self.nitroCharge >= minChargeToFire && nitroCornerOk) {
-            self._nitroActive = true;
-          }
-        } else {
-          if (self.nitroCharge <= 0.02 || !nitroCornerOk) {
-            self._nitroActive = false;
-          }
+          if (self.nitroCharge >= minChargeToFire && nitroCornerOk) self._nitroActive = true;
+        } else if (self.nitroCharge <= 0.02 || !nitroCornerOk) {
+          self._nitroActive = false;
         }
         const nitro = !!self._nitroActive;
 
-        let netSteerSuggestion = null, netConfidence = 0, netCatchAwareness = 0, netStability = 1;
-        if (this.weights) {
-          const now = performance.now();
-          if (now - this.lastNetTickAt >= 1000 / NEURAL_HZ || !this.lastNetOut) {
-            this.lastNetTickAt = now;
-            const catchUp = (opponent.totalProgress - self.totalProgress) / 50;
-            const feats = buildFeatures(self, opponent, this.track, catchUp);
-            const out = forward(this.weights, feats);
-            const newSteer = out[0];
-            if (this.lastNetOut) {
-              const jump = Math.abs(newSteer - this.lastNetOut.steer);
-              this._steerVolatility = (this._steerVolatility ?? 0) * 0.7 + jump * 0.3;
-            }
-            this.lastNetOut = {
-              steer: newSteer,
-              confidence: (out[4] + 1) * 0.5,
-              catchAwareness: Math.max(0, catchUp),
-              stability: Math.max(0, 1 - (this._steerVolatility ?? 0) * 3),
-            };
-          }
-          netSteerSuggestion = this.lastNetOut.steer;
-          netConfidence = this.lastNetOut.confidence;
-          netCatchAwareness = this.lastNetOut.catchAwareness;
-          netStability = this.lastNetOut.stability;
-        }
-
         const kHere = base.cornerSharpness[idx];
         const cornerTighten = 1 / (1 + kHere * 6.0);
-        const lookahead = Math.max(6, Math.min(22, Math.floor(spd * 0.22 * cornerTighten)));
+        const lookahead = Math.max(6, Math.min(24, Math.floor(spd * 0.24 * cornerTighten)));
         const aheadIdx  = (idx + lookahead) % n;
         const aSample   = this.track.samples[aheadIdx];
-        const rl = base.racingLine[aheadIdx];
-
-        let cornerRl = rl;
-        if (netSteerSuggestion !== null && kHere > 0.03) {
-          const cornerNudgeWeight = Math.min(0.35, netConfidence * 0.4) * netStability;
-          cornerRl = rl * (1 - cornerNudgeWeight) + netSteerSuggestion * cornerNudgeWeight;
-        }
+        let cornerRl = base.racingLine[aheadIdx];
 
         const closeBehindPlayer = gap < 0 && gap > -30;
         if (closeBehindPlayer && kHere < 0.05) {
@@ -227,120 +187,64 @@
           cornerRl = cornerRl * (1 - overtakeWeight) + overtakeSide * 0.45 * overtakeWeight;
         }
 
-        const stealLookahead = 70 + Math.round(netCatchAwareness * 15);
-        const steal = findStealableBottle(self, opponent, this.track, bottles, base.cornerSharpness, stealLookahead, gap);
+        const steal = findStealableBottle(self, opponent, this.track, bottles, base.cornerSharpness, 70, gap);
         const seek  = steal ? null : findSeekableBottle(self, this.track, bottles, base.cornerSharpness, 50);
         const grab  = steal || seek;
         const grabWeight = steal ? 0.90 : 0.70;
         const lineRl = grab ? cornerRl * (1 - grabWeight) + grab.lateralBias * grabWeight : cornerRl;
 
-        const target = aSample.pos.clone().addScaledVector(
-          aSample.normal, lineRl * this.track.roadWidth * 0.46
-        );
-
+        const target = aSample.pos.clone().addScaledVector(aSample.normal, lineRl * this.track.roadWidth * 0.46);
         if (grab) {
           const bottleSample = this.track.samples[grab.bottle.idx % n];
           const bottleTarget = bottleSample.pos.clone().addScaledVector(bottleSample.tangent, 2.5);
           target.lerp(bottleTarget, grabWeight);
         }
-        const dx = target.x - self.pos.x;
-        const dz = target.z - self.pos.z;
-        const desired = Math.atan2(dx, dz);
-        let diff = desired - self.heading;
+        const dx = target.x - self.pos.x, dz = target.z - self.pos.z;
+        let diff = Math.atan2(dx, dz) - self.heading;
         while (diff >  Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
         const steerGain = 3.2 + kHere * 8.0;
         const steer = Math.max(-1, Math.min(1, diff * steerGain));
-
         return { throttle, steer, nitro, jump: false };
       }
     }
 
-    const _featureScriptedCache = new Map();
-    function getFeatureScripted(track) {
-      const k = track.startPos.x;
-      if (!_featureScriptedCache.has(k)) _featureScriptedCache.set(k, new ScriptedOpponent(track, 1.0));
-      if (_featureScriptedCache.size > 6) _featureScriptedCache.delete(_featureScriptedCache.keys().next().value);
-      return _featureScriptedCache.get(k);
-    }
+    /* ---------------- difficulty ladder (fair physics for everyone) ---------------- */
+    const DIFFICULTY = {
+      low:    { name: "Low",    kind: "scripted", boost: 0.72, aLat: 230, vTop: 70, nitroOn: false, rubber: false, cap: 0.05 },
+      medium: { name: "Medium", kind: "scripted", boost: 0.86, aLat: 270, vTop: 78, nitroOn: true,  rubber: false, cap: 0.05 },
+      high:   { name: "High",   kind: "scripted", boost: 1.05, aLat: 320, vTop: 88, nitroOn: true,  rubber: true,  cap: 0.04 },
+      max:    { name: "Max",    kind: "max",      boost: 1.25, aLat: 400, vTop: 88, nitroMin: 0.4, nitroCorner: 30, catchUp: 0.1, brakeK: 0.08, accelMul: 1.10, topMul: 1.035, cap: 0.008 }
+    };
 
-    function buildFeatures(self, opp, track, catchUp = 0) {
-      const f = new Float32Array(NN_INPUTS);
-      const n = track.samples.length;
-      const idx = nearestSampleIndex(track, self.pos, self.progress);
-      const s = track.samples[idx];
-      const lateral = self.pos.clone().sub(s.pos).dot(s.normal);
-      const trackHeading = Math.atan2(s.tangent.x, s.tangent.z);
-      let headingErr = self.heading - trackHeading;
-      while (headingErr > Math.PI) headingErr -= Math.PI * 2;
-      while (headingErr < -Math.PI) headingErr += Math.PI * 2;
-      const sc = getFeatureScripted(track);
-
-      f[0] = Math.tanh(self.speed / 60);
-      f[1] = Math.tanh(lateral / (track.roadWidth / 2));
-      f[2] = headingErr / Math.PI;
-      f[3] = Math.tanh((self.speed - sc.vMax[idx]) / 30);
-
-      for (let k = 0; k < 12; k++) {
-        const step = 3 + k * 4;
-        const a = track.samples[(idx + step) % n];
-        const b = track.samples[(idx + step + 2) % n];
-        const ca = Math.atan2(a.tangent.x, a.tangent.z);
-        const cb = Math.atan2(b.tangent.x, b.tangent.z);
-        let cv = cb - ca;
-        while (cv > Math.PI) cv -= Math.PI * 2;
-        while (cv < -Math.PI) cv += Math.PI * 2;
-        f[4 + k] = Math.tanh(cv * 6);
+    /* Real learner: evolves 3 knobs t=[pace, cornering, nitro] in [0,1] across races (1+1 evolution strategy).
+       Each race tries best + gaussian noise; if the rival did better against you (further ahead / won), the
+       trial becomes the new best. Knobs only move inside each difficulty's small band (cap), so Max stays beatable. */
+    const Learner = {
+      fresh() { return { v: 2, best: [0, 0, 0], bestScore: -1e9, trial: null, stats: { generation: 0, races: 0, bestFitness: 0, lastFitness: 0, wins: 0 }, sigma: 0.35 }; },
+      propose(brain) {
+        const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 1.15;
+        brain.trial = brain.best.map((x) => Math.min(1, Math.max(0, x + g() * brain.sigma)));
+        if (brain.stats.races === 0) brain.trial = [0.5, 0.5, 0.5];
+        return brain.trial.slice();
+      },
+      /* score: positive when the rival ends ahead of you (metres, +bonus for a win) */
+      report(brain, aiWon, gapMeters) {
+        const gm = Math.min(600, gapMeters), score = (aiWon ? 400 + gm : -gm);
+        const st = brain.stats;
+        st.races++; st.lastFitness = score; if (!aiWon) st.wins++;   // wins = player's wins against Felix
+        if (score > brain.bestScore) { brain.bestScore = score; if (brain.trial) brain.best = brain.trial.slice(); st.generation++; st.bestFitness = Math.max(st.bestFitness, score); }
+        brain.sigma = Math.max(0.12, brain.sigma * 0.96);
+        return brain;
       }
+    };
 
-      for (let k = 0; k < 6; k++) {
-        const step = 4 + k * 6;
-        const a = track.samples[(idx + step) % n];
-        const off = self.pos.clone().sub(a.pos).dot(a.normal);
-        f[16 + k] = Math.tanh(off / (track.roadWidth / 2));
-      }
-
-      for (let k = 0; k < 4; k++) {
-        const lookSteps = [4, 10, 20, 36][k];
-        const vAhead = sc.vMax[(idx + lookSteps) % n];
-        f[22 + k] = Math.tanh((vAhead - self.speed) / 40);
-      }
-
-      for (let k = 0; k < 4; k++) {
-        const lookSteps = [6, 12, 20, 32][k];
-        f[26 + k] = sc.racingLine[(idx + lookSteps) % n];
-      }
-
-      const dx = opp.pos.x - self.pos.x;
-      const dz = opp.pos.z - self.pos.z;
-      f[30] = Math.tanh(dx / 40);
-      f[31] = Math.tanh(dz / 40);
-      f[32] = Math.tanh(Math.hypot(dx, dz) / 40);
-
-      f[33] = self.nitroCharge;
-      f[34] = (self._nitroState || 'BLAST') === 'BLAST' ? 1 : -1;
-      f[35] = Math.max(0, (self._nitroCooldownT || 0) / 3.0);
-      f[36] = self.airborne ? 1 : 0;
-      f[37] = self.knockoutMs > 0 ? 1 : 0;
-
-      f[38] = Math.tanh((self.totalProgress - opp.totalProgress) / 100);
-      f[39] = Math.tanh(catchUp);
-      f[40] = self.speed > 0 ? 1 : -1;
-
-      const windows = [8, 20, 40];
-      for (let w = 0; w < 3; w++) {
-        let maxC = 0;
-        for (let k = 0; k < windows[w]; k++) {
-          const a2 = track.samples[(idx + k) % n];
-          const b2 = track.samples[(idx + k + 1) % n];
-          const d1 = Math.atan2(a2.tangent.x, a2.tangent.z);
-          const d2 = Math.atan2(b2.tangent.x, b2.tangent.z);
-          let dd = d2 - d1;
-          while (dd > Math.PI) dd -= Math.PI * 2;
-          while (dd < -Math.PI) dd += Math.PI * 2;
-          maxC = Math.max(maxC, Math.abs(dd));
-        }
-        f[41 + w] = Math.tanh(maxC * 8);
-      }
-      return f;
+    function makeOpponent(track, level, theta) {
+      const D = DIFFICULTY[level] || DIFFICULTY.high;
+      const t = theta || [0, 0, 0];
+      const boost = D.boost * (1 + D.cap * t[0]);
+      const aLat = D.aLat * (1 + 0.12 * t[1]);
+      const nitroMin = (D.nitroMin || 0.45) - 0.12 * t[2];
+      if (D.kind === "max") return new ImpossibleOpponent(track, { boost, aLat, vTop: D.vTop, nitroMin, nitroCorner: D.nitroCorner, catchUp: D.catchUp, brakeK: D.brakeK });
+      return new ScriptedOpponent(track, boost, aLat, D.vTop, { nitroOn: D.nitroOn, rubber: D.rubber });
     }

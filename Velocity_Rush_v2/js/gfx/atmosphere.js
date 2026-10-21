@@ -62,7 +62,7 @@ VR.Atmosphere = class Atmosphere {
 
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(100, 40, 20), this._makeSkyMaterial(u, quality.cloudOct, 1));
     this.sky.frustumCulled = false;
-    this.sky.renderOrder = -1000;
+    this.sky.renderOrder = 1000;   // drawn after the opaque world: early-z skips every sky pixel hidden behind terrain
     scene.add(this.sky);
 
     // Sun / moon light

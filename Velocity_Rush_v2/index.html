@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#07090d" />
   <meta name="color-scheme" content="dark" />
   <meta name="format-detection" content="telephone=no" />
-  <meta name="description" content="Velocity Rush — procedural racing against a trained neural rival." />
+  <meta name="description" content="Velocity Rush — procedural racing against four difficulty levels and a rival that can learn." />
   <title>Velocity Rush</title>
   <link rel="icon" href="assets/icon.png" />
   <link rel="stylesheet" href="css/fonts.css" />
@@ -44,18 +44,18 @@
 
         <div class="glass panel">
           <div class="sec">
-            <label class="lbl">Opponent</label>
-            <div class="opp-grid">
-              <button id="btn-scripted" class="opp" type="button">
-                <svg class="ico"><use href="#i-target"/></svg>
-                <span class="t"><b>Scripted</b><small>Optimal racing line</small></span>
-              </button>
-              <button id="btn-impossible" class="opp danger" type="button">
-                <svg class="ico"><use href="#i-skull"/></svg>
-                <span class="t"><b>Impossible</b><small>Felix v3 · neural rival</small></span>
-                <em id="brain-chip">GEN 0</em>
-              </button>
+            <label class="lbl">Difficulty</label>
+            <div class="opp-grid four" id="diff-grid">
+              <button id="btn-low" data-diff="low" class="opp" type="button"><span class="t"><b>Low</b><small>Relaxed</small></span></button>
+              <button id="btn-medium" data-diff="medium" class="opp" type="button"><span class="t"><b>Medium</b><small>Competitive</small></span></button>
+              <button id="btn-high" data-diff="high" class="opp" type="button"><span class="t"><b>High</b><small>Hard</small></span></button>
+              <button id="btn-max" data-diff="max" class="opp danger" type="button"><span class="t"><b>Max</b><small>Tactical</small></span></button>
             </div>
+            <button id="btn-learn" class="learn-row" type="button" role="switch" aria-checked="false">
+              <span class="fox">🦊</span>
+              <span class="t"><b>Learning AI</b><small id="learn-sub">Rival adapts to you over races</small></span>
+              <i class="knob"></i><em id="brain-chip">GEN 0</em>
+            </button>
           </div>
           <div class="row2">
             <div class="sec">
@@ -136,7 +136,7 @@
             </div>
             <div class="page" id="tab-brain">
               <div class="brain">
-                <div class="brain-head"><div class="fox">🦊</div><div><h3>Felix v3</h3><p>Project Kitsune · neural racing AI</p></div></div>
+                <div class="brain-head"><div class="fox">🦊</div><div><h3>Felix</h3><p>Project Kitsune · learning rival</p></div></div>
                 <div class="stats4">
                   <div><b id="st-gen">0</b><span>Generation</span></div>
                   <div><b id="st-races">0</b><span>Races</span></div>
@@ -150,8 +150,8 @@
             </div>
             <div class="page" id="tab-about">
               <div class="about">
-                <p>Felix v3 is a racing brain trained entirely on your device through evolutionary reinforcement — no cloud, no pretrained weights. Its saved brain is loaded in Impossible mode, where it shapes cornering lines (aiming for the fastest line through a turn) and nitro-steal decisions, while acceleration and nitro timing stay under Impossible's own tuned logic.</p>
-                <div class="badges"><span>44 inputs</span><span>192·192·128·64</span><span>5 outputs</span><span>Persistent memory</span><span>Nitro theft</span></div>
+                <p>Felix is a rival that learns on your device. With the Learning AI toggle on (Medium, High or Max), each race it tries a slightly different pace, cornering and nitro setting, and keeps the one that beat you by the most — so it slowly adapts to how you drive. It can only improve inside a small band for each difficulty, so Max always stays beatable. Low never learns. All data stays on this device.</p>
+                <div class="badges"><span>4 difficulties</span><span>Evolving rival</span><span>Persistent memory</span><span>Nitro theft (Max)</span></div>
                 <p class="foot">Velocity Rush · rebuilt visuals · Three.js r128</p>
               </div>
             </div>
